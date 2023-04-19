@@ -60,6 +60,9 @@ func (bt *BTree) Iterator(reverse bool) Iterator {
 	defer bt.lock.RUnlock()
 	return newBTreeIterator(bt.tree, reverse)
 }
+func (bt *BTree) Close() error {
+	return nil
+}
 
 // BTree索引迭代器
 type btreeIterator struct {

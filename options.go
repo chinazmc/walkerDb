@@ -37,6 +37,8 @@ const (
 	Btree IndexerType = iota + 1
 	//ART自适应基数树索引
 	ART
+	//BPlusTree B+索引，将索引存储到磁盘中
+	BPlusTree
 )
 
 var DefaultOptions = Options{
