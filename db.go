@@ -378,7 +378,7 @@ func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, er
 // 在访问此方法之前必须持有互斥锁
 func (db *DB) setActiveDataFile() error {
 	var initialFileId uint32 = 0
-	if db.activeFile == nil {
+	if db.activeFile != nil {
 		initialFileId = db.activeFile.FileId + 1
 	}
 	// 打开新的数据文件
