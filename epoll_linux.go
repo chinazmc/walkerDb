@@ -4,7 +4,6 @@
 package main
 
 import (
-	"log"
 	"net"
 	"reflect"
 	"sync"
@@ -43,7 +42,7 @@ func (e *epoll) Add(conn net.Conn) error {
 	defer e.lock.Unlock()
 	e.connections[fd] = conn
 	if len(e.connections)%100 == 0 {
-		log.Printf("total number of connections: %v", len(e.connections))
+		logger.Printf("total number of connections: %v", len(e.connections))
 	}
 	return nil
 }
@@ -62,7 +61,7 @@ retry:
 	defer e.lock.Unlock()
 	delete(e.connections, fd)
 	if len(e.connections)%100 == 0 {
-		log.Printf("total number of connections: %v", len(e.connections))
+		logger.Printf("total number of connections: %v", len(e.connections))
 	}
 	return nil
 }

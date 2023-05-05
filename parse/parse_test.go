@@ -1,9 +1,14 @@
 package parse
 
-import "testing"
+import (
+	"bytes"
+	"io"
+	"testing"
+	"walkerDb/reply"
+)
 
-func TestParseOne(t *testing.T) {
-	req := MakeMultiBulkReply([][]byte{
+func TestMultiBulkReply(t *testing.T) {
+	req := reply.MakeMultiBulkReply([][]byte{
 		[]byte("set"),
 		[]byte("hello"),
 		[]byte("world"),
@@ -15,11 +20,31 @@ func TestParseOne(t *testing.T) {
 		[]byte("del"),
 		[]byte("hello1"),
 	})
-	arr, err := ParseOne(req.ToBytes())
-	if err != nil {
-		t.Error(err)
+	reader := bytes.NewReader(req.ToBytes())
+	ch := ParseStream(reader)
+	for result := range ch {
+		if result.Err != nil {
+			if result.Err == io.EOF {
+				continue
+			}
+			t.Error(result.Err)
+			continue
+		}
+		t.Logf("reslut:%s", string(result.Data.ToBytes()))
 	}
-	for _, result := range arr {
-		t.Logf("key:%s,value:%s,type:%d", string(result.Key), string(result.Value), result.Type)
+}
+func TestBulkReply(t *testing.T) {
+	req := reply.MakeBulkReply([]byte("a\r\nb"))
+	reader := bytes.NewReader(req.ToBytes())
+	ch := ParseStream(reader)
+	for result := range ch {
+		if result.Err != nil {
+			if result.Err == io.EOF {
+				continue
+			}
+			t.Error(result.Err)
+			continue
+		}
+		t.Logf("reslut:%s", string(result.Data.ToBytes()))
 	}
 }

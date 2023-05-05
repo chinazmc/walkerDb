@@ -35,6 +35,10 @@ type WriteBatchOptions struct {
 	//提交的时候是否sync持久化
 	SyncWrites bool
 }
+type DataBaseOptions struct {
+	Self  string
+	Peers []string
+}
 
 type IndexerType = int8
 
@@ -63,4 +67,8 @@ var DefaultIteratorOptions = IteratorOptions{
 var DefaultWriteBatchOptions = WriteBatchOptions{
 	MaxBatchNum: 10000,
 	SyncWrites:  true,
+}
+var DefaultDataBaseOptions = DataBaseOptions{
+	Self:  "127.0.0.1:6337",
+	Peers: []string{},
 }

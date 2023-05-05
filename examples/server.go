@@ -1,9 +1,10 @@
 package main
 
 import (
-	"log"
+	"fmt"
 	"net"
 	"walkerDb"
+	"walkerDb/logger"
 )
 
 func main() {
@@ -16,16 +17,16 @@ func main() {
 		conn, e := listener.Accept()
 		if e != nil {
 			if ne, ok := e.(net.Error); ok && ne.Timeout() {
-				log.Printf("accept temp err: %v", ne)
+				logger.Info(fmt.Sprintf("accept temp err: %v", ne))
 				continue
 			}
 
-			log.Printf("accept err: %v", e)
+			logger.Info(fmt.Sprintf("accept err: %v", e))
 			return
 		}
 
 		if err := walkerDb.Epoller.Add(conn); err != nil {
-			log.Printf("failed to add connection %v", err)
+			logger.Info(fmt.Sprintf("failed to add connection %v", err))
 			conn.Close()
 		}
 	}

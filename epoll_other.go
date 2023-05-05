@@ -18,7 +18,10 @@ type epoll struct {
 
 func MkEpoll(listener net.Listener) (*epoll, error) {
 
-	return &epoll{listener: listener}, nil
+	return &epoll{
+		listener: listener,
+		ch:       make(chan net.Conn),
+	}, nil
 }
 
 func (e *epoll) Add(conn net.Conn) error {

@@ -1,0 +1,2 @@
+考虑参考https://www.cnblogs.com/Finley/p/14038398.html 来做一个一致性hash+虚拟节点，
+然后使用k8s无头service作为节点获取，是否还可以以此来写一个operator？？？？
