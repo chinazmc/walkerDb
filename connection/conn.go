@@ -13,7 +13,19 @@ type Connection struct {
 	mu           sync.Mutex
 }
 
-func NewConn(conn net.Conn) *Connection {
+func NewConn(conn net.Conn, writeTimeout, readTimeout, keepAliveTimeout time.Duration) *Connection {
+	if readTimeout != 0 {
+		conn.SetReadDeadline(time.Now().Add(readTimeout))
+	}
+	if writeTimeout != 0 {
+		conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+	}
+	if keepAliveTimeout != 0 {
+		if tcpConn, ok := conn.(*net.TCPConn); ok {
+			tcpConn.SetKeepAlive(true)
+			tcpConn.SetKeepAlivePeriod(keepAliveTimeout)
+		}
+	}
 	return &Connection{
 		conn: conn,
 	}

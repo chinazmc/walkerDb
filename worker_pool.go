@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"walkerDb/connection"
 	"walkerDb/database"
 	databaseface "walkerDb/interface/database"
@@ -65,11 +66,15 @@ type pool struct {
 
 	activeConn sync.Map // *client -> placeholder
 	db         databaseface.Database
+
+	ConnWriteTimeout time.Duration
+	ReadTimeout      time.Duration
+	KeepAliveTimeout time.Duration
 }
 
 func newPool(w int, t int) *pool {
 	var db databaseface.Database
-	config := DefaultDataBaseOptions
+	config := database.DefaultDataBaseOptions
 	if config.Self != "" &&
 		len(config.Peers) > 0 {
 		//db = cluster.MakeClusterDatabase()
@@ -77,11 +82,12 @@ func newPool(w int, t int) *pool {
 		db = database.NewStandaloneDatabase()
 	}
 	return &pool{
-		workers:   w,
-		maxTasks:  t,
-		taskQueue: make(chan net.Conn, t),
-		done:      make(chan struct{}),
-		db:        db,
+		workers:          w,
+		maxTasks:         t,
+		taskQueue:        make(chan net.Conn, t),
+		done:             make(chan struct{}),
+		db:               db,
+		KeepAliveTimeout: 5 * time.Minute,
 	}
 }
 
@@ -141,7 +147,7 @@ func (p *pool) handleConn(conn net.Conn) {
 		_ = conn.Close()
 		return
 	}
-	client := connection.NewConn(conn)
+	client := connection.NewConn(conn, p.ConnWriteTimeout, p.ReadTimeout, p.KeepAliveTimeout)
 	p.activeConn.Store(client, struct{}{})
 	ch := parse.ParseStream(conn)
 	for payload := range ch {

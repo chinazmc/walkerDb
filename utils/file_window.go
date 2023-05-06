@@ -5,5 +5,5 @@ package utils
 
 func AvailableDiskSize() (uint64, error) {
 	//todo
-	return 0, nil
+	return 10000, nil
 }

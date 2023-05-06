@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strings"
-	"walkerDb"
 	"walkerDb/connection"
 	"walkerDb/logger"
 	"walkerDb/reply"
@@ -12,13 +11,13 @@ import (
 
 // StandaloneDatabase
 type StandaloneDatabase struct {
-	db *walkerDb.DB
+	db *DB
 }
 
 func NewStandaloneDatabase() *StandaloneDatabase {
-	opts := walkerDb.DefaultOptions
+	opts := DefaultOptions
 	opts.DirPath = "/tmp/bitcask-go"
-	db, err := walkerDb.Open(opts)
+	db, err := Open(opts)
 	if err != nil {
 		panic(err)
 	}

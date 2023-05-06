@@ -1,4 +1,4 @@
-package walkerDb
+package database
 
 import (
 	"bytes"
