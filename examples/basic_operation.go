@@ -2,13 +2,13 @@ package main
 
 import (
 	"fmt"
-	bitcask "walkerDb"
+	"walkerDb/database"
 )
 
 func main() {
-	opts := bitcask.DefaultOptions
+	opts := database.DefaultOptions
 	opts.DirPath = "/tmp/bitcask-go"
-	db, err := bitcask.Open(opts)
+	db, err := database.Open(opts)
 	if err != nil {
 		panic(err)
 	}

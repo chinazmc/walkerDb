@@ -16,9 +16,9 @@ func main() {
 	defer conn.Close() // 关闭连接
 
 	req := reply.MakeMultiBulkReply([][]byte{
-		[]byte("get"),
+		[]byte("set"),
 		[]byte("my"),
-		//[]byte("first"),
+		[]byte("first"),
 	})
 	_, err = conn.Write(req.ToBytes()) // 发送数据
 	if err != nil {

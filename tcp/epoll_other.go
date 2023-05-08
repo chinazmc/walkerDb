@@ -1,7 +1,7 @@
 //go:build !linux
 // +build !linux
 
-package walkerDb
+package tcp
 
 import (
 	"net"

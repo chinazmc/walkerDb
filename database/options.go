@@ -68,7 +68,3 @@ var DefaultWriteBatchOptions = WriteBatchOptions{
 	MaxBatchNum: 10000,
 	SyncWrites:  true,
 }
-var DefaultDataBaseOptions = DataBaseOptions{
-	Self:  "127.0.0.1:6337",
-	Peers: []string{},
-}

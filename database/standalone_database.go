@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strings"
-	"walkerDb/connection"
+	databaseface "walkerDb/interface/database"
 	"walkerDb/logger"
 	"walkerDb/reply"
 )
@@ -14,9 +14,11 @@ type StandaloneDatabase struct {
 	db *DB
 }
 
-func NewStandaloneDatabase() *StandaloneDatabase {
+func NewStandaloneDatabase(config databaseface.StandaloneDatabaseConfig) *StandaloneDatabase {
 	opts := DefaultOptions
-	opts.DirPath = "/tmp/bitcask-go"
+	if config.DataDir != "" {
+		opts.DirPath = config.DataDir
+	}
 	db, err := Open(opts)
 	if err != nil {
 		panic(err)
@@ -25,7 +27,7 @@ func NewStandaloneDatabase() *StandaloneDatabase {
 }
 
 // Exec 执行command
-func (mdb *StandaloneDatabase) Exec(c *connection.Connection, cmdLine [][]byte) (result reply.Reply) {
+func (mdb *StandaloneDatabase) Exec(cmdLine [][]byte) (result reply.Reply) {
 
 	defer func() {
 		if err := recover(); err != nil {
@@ -65,8 +67,27 @@ func (mdb *StandaloneDatabase) Exec(c *connection.Connection, cmdLine [][]byte) 
 
 // Close 优雅关机
 func (mdb *StandaloneDatabase) Close() {
-
+	mdb.db.Close()
 }
 
-func (mdb *StandaloneDatabase) AfterClientClose(c connection.Connection) {
+// func (mdb *StandaloneDatabase) AfterClientClose(c connection.Connection) {
+// }
+func (mdb *StandaloneDatabase) Set(key []byte, value []byte) error {
+	return mdb.db.Put(key, value)
+}
+func (mdb *StandaloneDatabase) Get(key []byte) ([]byte, error) {
+	return mdb.db.Get(key)
+}
+
+// Del deletes an item in the cache by key and returns true or false if a delete occurred.
+func (mdb *StandaloneDatabase) Del(key []byte) bool {
+	err := mdb.db.Delete(key)
+	if err != nil {
+		return false
+	}
+	return true
+}
+func (mdb *StandaloneDatabase) SetEX(key []byte, value []byte, expireSeconds int) error {
+	//todo
+	return nil
 }

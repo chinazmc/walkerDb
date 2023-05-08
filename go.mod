@@ -9,6 +9,8 @@ require (
 	github.com/stretchr/testify v1.8.2
 	go.etcd.io/bbolt v1.3.7
 	golang.org/x/exp v0.0.0-20230321023759-10a507213a29
+		github.com/hashicorp/raft v1.3.3
+    	github.com/hashicorp/raft-boltdb/v2 v2.2.1
 )
 
 require (
