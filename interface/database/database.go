@@ -6,12 +6,13 @@ type CmdLine = [][]byte
 // Database redis风格存储接口
 type Database interface {
 	//Exec(args [][]byte) reply.Reply
+	Exec(cmdLine [][]byte) (result []byte)
 	//AfterClientClose(c connection.Connection)
 	Close()
 	Set(key []byte, value []byte) error
 	Get(key []byte) ([]byte, error)
 	// Del deletes an item in the cache by key and returns true or false if a delete occurred.
-	Del(key []byte) bool
+	Del(key []byte) (error, bool)
 	SetEX(key []byte, value []byte, expireSeconds int) error
 }
 

@@ -1,12 +1,7 @@
 package database
 
 import (
-	"fmt"
-	"runtime/debug"
-	"strings"
 	databaseface "walkerDb/interface/database"
-	"walkerDb/logger"
-	"walkerDb/reply"
 )
 
 // StandaloneDatabase
@@ -27,42 +22,8 @@ func NewStandaloneDatabase(config databaseface.StandaloneDatabaseConfig) *Standa
 }
 
 // Exec 执行command
-func (mdb *StandaloneDatabase) Exec(cmdLine [][]byte) (result reply.Reply) {
-
-	defer func() {
-		if err := recover(); err != nil {
-			logger.Warn(fmt.Sprintf("error occurs: %v\n%s", err, string(debug.Stack())))
-			result = &reply.UnknownErrReply{}
-		}
-	}()
-
-	cmdName := strings.ToLower(string(cmdLine[0]))
-	switch cmdName {
-	case "set":
-		err := mdb.db.Put(cmdLine[1], cmdLine[2])
-		if err != nil {
-			return reply.MakeErrReply(err.Error())
-		}
-		return &reply.NullBulkReply{}
-	case "get":
-		res, err := mdb.db.Get(cmdLine[1])
-		if err != nil {
-			return reply.MakeErrReply(err.Error())
-		}
-		if res == nil {
-			return &reply.NullBulkReply{}
-		}
-		return reply.MakeBulkReply(res)
-
-	case "del":
-		err := mdb.db.Delete(cmdLine[1])
-		if err != nil {
-			return reply.MakeErrReply(err.Error())
-		}
-		return reply.MakeIntReply(1)
-	default:
-		return reply.MakeErrReply("error operator type")
-	}
+func (mdb *StandaloneDatabase) Exec(cmdLine [][]byte) (result []byte) {
+	return
 }
 
 // Close 优雅关机
@@ -80,12 +41,12 @@ func (mdb *StandaloneDatabase) Get(key []byte) ([]byte, error) {
 }
 
 // Del deletes an item in the cache by key and returns true or false if a delete occurred.
-func (mdb *StandaloneDatabase) Del(key []byte) bool {
+func (mdb *StandaloneDatabase) Del(key []byte) (error, bool) {
 	err := mdb.db.Delete(key)
 	if err != nil {
-		return false
+		return err, false
 	}
-	return true
+	return nil, true
 }
 func (mdb *StandaloneDatabase) SetEX(key []byte, value []byte, expireSeconds int) error {
 	//todo

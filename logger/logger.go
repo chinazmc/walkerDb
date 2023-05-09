@@ -46,6 +46,9 @@ const flags = log.LstdFlags
 func init() {
 	logger = log.New(os.Stdout, defaultPrefix, flags)
 }
+func GetLogger() *log.Logger {
+	return logger
+}
 
 // Setup 初始化logger
 func Setup(settings *Settings) {

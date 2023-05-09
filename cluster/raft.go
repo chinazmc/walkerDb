@@ -1,0 +1,113 @@
+package cluster
+
+import (
+	"fmt"
+	"github.com/hashicorp/raft"
+	raftboltdb "github.com/hashicorp/raft-boltdb"
+	"io/ioutil"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+	"walkerDb/database"
+	databaseface "walkerDb/interface/database"
+	"walkerDb/logger"
+)
+
+type RaftNodeInfo struct {
+	raft           *raft.Raft
+	fsm            *FSM
+	leaderNotifyCh chan bool
+}
+
+func newRaftTransport(config *databaseface.RaftDatabaseConfig) (*raft.NetworkTransport, error) {
+	address, err := net.ResolveTCPAddr("tcp", config.RaftTCPAddress)
+	if err != nil {
+		return nil, err
+	}
+	transport, err := raft.NewTCPTransport(address.String(), address, 3, 10*time.Second, os.Stderr)
+	if err != nil {
+		return nil, err
+	}
+	return transport, nil
+}
+func newRaftNode(config *databaseface.RaftDatabaseConfig) (*RaftNodeInfo, error) {
+	raftConfig := raft.DefaultConfig()
+	raftConfig.LocalID = raft.ServerID(config.RaftTCPAddress)
+	raftConfig.Logger = logger.GetLogger()
+	raftConfig.SnapshotInterval = 20 * time.Second
+	raftConfig.SnapshotThreshold = 2 //每commit多少log entry后生成一次快照
+	leaderNotifyCh := make(chan bool, 1)
+	raftConfig.NotifyCh = leaderNotifyCh
+
+	transport, err := newRaftTransport(config)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(config.RaftDataDir, os.ModePerm); err != nil {
+		return nil, err
+	}
+	databaseOpts := database.DefaultOptions
+	if config.DataDir != "" {
+		databaseOpts.DirPath = config.DataDir
+	}
+	db, err := database.Open(databaseOpts)
+	if err != nil {
+		panic(err)
+	}
+	fsm := &FSM{
+		db: db,
+	}
+	snapshotStore, err := raft.NewFileSnapshotStore(config.RaftDataDir, 1, os.Stderr)
+	if err != nil {
+		return nil, err
+	}
+
+	logStore, err := raftboltdb.NewBoltStore(filepath.Join(config.RaftDataDir, "raft-log.bolt"))
+	if err != nil {
+		return nil, err
+	}
+
+	stableStore, err := raftboltdb.NewBoltStore(filepath.Join(config.RaftDataDir, "raft-stable.bolt"))
+	if err != nil {
+		return nil, err
+	}
+
+	raftNode, err := raft.NewRaft(raftConfig, fsm, logStore, stableStore, snapshotStore, transport)
+	if err != nil {
+		return nil, err
+	}
+	configuration := raft.Configuration{
+		Servers: []raft.Server{
+			{
+				ID:      raftConfig.LocalID,
+				Address: transport.LocalAddr(),
+			},
+		},
+	}
+	raftNode.BootstrapCluster(configuration)
+	return &RaftNodeInfo{raft: raftNode, fsm: fsm, leaderNotifyCh: leaderNotifyCh}, nil
+}
+
+// joinRaftCluster joins a node to raft cluster
+func joinRaftCluster(opts *databaseface.RaftDatabaseConfig) error {
+	url := fmt.Sprintf("http://%s/join?peerAddress=%s", opts.JoinAddress, opts.RaftTCPAddress)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	if string(body) != "ok" {
+		return errors.New(fmt.Sprintf("Error joining cluster: %s", body))
+	}
+
+	return nil
+}

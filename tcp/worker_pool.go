@@ -115,11 +115,14 @@ func (p *pool) handleConn(connArgs *ConnArgs) {
 				reply.Write(CRLF)
 			}
 		} else if bytes.Equal(req.args[0], DEL) {
-			if cache.Del(req.args[1]) {
+			if _, isDel := cache.Del(req.args[1]); isDel {
 				reply.Write(CONE)
 			} else {
 				reply.Write(CZERO)
 			}
+		} else if bytes.Equal(req.args[0], JOIN) {
+			peerAddress := string(req.args[1])
+
 		}
 	} else if len(req.args) == 1 {
 		if bytes.Equal(req.args[0], PING) {
