@@ -12,6 +12,9 @@ func main() {
 		DataDir:        op.dataDir,
 		Bootstrap:      op.bootstrap,
 		JoinAddress:    op.joinAddress,
+		TcpAddress:     op.tcpAddress,
+		RaftDataDir:    op.raftDataDir,
+		NodeId:         op.nodeId,
 	})
 	server.Start()
 }

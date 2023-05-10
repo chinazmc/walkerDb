@@ -14,6 +14,7 @@ type Database interface {
 	// Del deletes an item in the cache by key and returns true or false if a delete occurred.
 	Del(key []byte) (error, bool)
 	SetEX(key []byte, value []byte, expireSeconds int) error
+	Start()
 }
 
 // DataEntity 存储绑定到键的数据，包括字符串、列表、哈希、集等

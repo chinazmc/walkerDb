@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"net"
 	"time"
+	. "walkerDb/parse"
 )
 
 type Connection struct {
@@ -44,7 +45,7 @@ func NewConn(conn net.Conn, server *Server) *Connection {
 func (c *Connection) readLoop() {
 	for {
 		var req = new(Request)
-		req.buf = new(bytes.Buffer)
+		req.Buf = new(bytes.Buffer)
 		err := ReadClient(bufio.NewReader(c.conn), req)
 		if err != nil {
 			return

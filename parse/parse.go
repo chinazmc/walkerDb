@@ -2,220 +2,148 @@ package parse
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"io"
-	"runtime/debug"
-	"strconv"
-	"walkerDb/logger"
-	"walkerDb/reply"
 )
 
-//用这个协议来解决粘包
-// RESP 通过第一个字符来表示格式：
-//
-// 简单字符串：以"+" 开始， 如："+OK\r\n"
-// 错误：以"-" 开始，如："-ERR Invalid Synatx\r\n"
-// 整数：以":"开始，如：":1\r\n"
-// 字符串：以 $ 开始
-// 数组：以 * 开始
-// 参考https://www.cnblogs.com/Finley/p/11923168.html
+var (
+	protocolErr       = errors.New("protocol error")
+	CRLF              = []byte("\r\n")
+	PING              = []byte("ping")
+	DBSIZE            = []byte("dbsize")
+	ERROR_UNSUPPORTED = []byte("-ERR unsupported command\r\n")
+	OK                = []byte("+OK\r\n")
+	InternalErr       = []byte("-ERR internal error\r\n")
+	NotLeaderErr      = []byte("-ERR cluster hasnt leader")
+	PONG              = []byte("+PONG\r\n")
+	GET               = []byte("get")
+	SET               = []byte("set")
+	SETEX             = []byte("setex")
+	DEL               = []byte("del")
+	JOIN              = []byte("join")
+	LEVELGET          = []byte("levelget")
+	NIL               = []byte("$-1\r\n")
+	CZERO             = []byte(":0\r\n")
+	CONE              = []byte(":1\r\n")
+	BulkSign          = []byte("$")
+)
 
-// *3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n
-// Payload stores redis.Reply or error
-type Payload struct {
-	Data reply.Reply
-	Err  error
+type Request struct {
+	Args [][]byte
+	Buf  *bytes.Buffer
 }
 
-func ParseStream(reader io.Reader) <-chan *Payload {
-	ch := make(chan *Payload)
-	go parse0(reader, ch)
-	return ch
-}
-
-type readState struct {
-	readingMultiLine  bool //解析器正在解析多行或单行数据
-	expectedArgsCount int  //正在读去的指令应该有几个参数
-	msgType           byte
-	args              [][]byte
-	bulkLen           int64 //字节组的长度
-}
-
-func (s *readState) finished() bool { //记录解析是不是没有完成
-	return s.expectedArgsCount > 0 && len(s.args) == s.expectedArgsCount
-}
-func parse0(reader io.Reader, ch chan<- *Payload) {
-	defer func() {
-		if err := recover(); err != nil {
-			logger.Error(string(debug.Stack()))
-		}
-	}()
-	bufReader := bufio.NewReader(reader)
-	var state readState
-	var err error
-	var msg []byte
-	for {
-		var ioErr bool
-		msg, ioErr, err = readLine(bufReader, &state)
-		if err != nil {
-			if ioErr {
-				ch <- &Payload{
-					Err: err,
-				}
-				close(ch)
-				return
-			}
-			ch <- &Payload{
-				Err: err,
-			}
-			state = readState{}
-			continue
-		}
-		if !state.readingMultiLine {
-			switch msg[0] {
-			case '*':
-				err = parseMultiBulkHeader(msg, &state)
-				if err != nil {
-					ch <- &Payload{
-						Err: errors.New("protocol error: " + string(msg)),
-					}
-					state = readState{} // 重新设置状态
-					continue
-				}
-				if state.expectedArgsCount == 0 {
-					ch <- &Payload{
-						Data: &reply.EmptyMultiBulkReply{},
-					}
-					state = readState{}
-					continue
-				}
-			case '+':
-			case '-':
-			case ':':
-			case '$':
-				err = parseBulkHeader(msg, &state)
-				if err != nil {
-					ch <- &Payload{
-						Err: errors.New("protocol error: " + string(msg)),
-					}
-					state = readState{}
-					continue
-				}
-				if state.bulkLen == -1 { // 空 bulk reply
-					ch <- &Payload{
-						Data: &reply.NullBulkReply{},
-					}
-					state = readState{}
-					continue
-				}
-			default:
-
-			}
-		} else {
-			err = readBody(msg, &state)
-			if err != nil {
-				ch <- &Payload{
-					Err: errors.New("protocol error: " + string(msg)),
-				}
-				state = readState{}
-				continue
-			}
-			// 去过发送完成
-			if state.finished() {
-				var result reply.Reply
-				if state.msgType == '*' {
-					result = reply.MakeMultiBulkReply(state.args)
-				} else if state.msgType == '$' {
-					result = reply.MakeBulkReply(state.args[0])
-				}
-				ch <- &Payload{
-					Data: result,
-					Err:  err,
-				}
-				state = readState{}
-			}
-		}
-
-	}
-}
-func readBody(msg []byte, state *readState) error {
-	line := msg[0 : len(msg)-2]
-	var err error
-	if line[0] == '$' {
-		state.bulkLen, err = strconv.ParseInt(string(line[1:]), 10, 64)
-		if err != nil {
-			return errors.New("protocol error: " + string(msg))
-		}
-		if state.bulkLen <= 0 {
-			state.args = append(state.args, []byte{})
-			state.bulkLen = 0
-		}
-	} else {
-		state.args = append(state.args, line)
-	}
-	return nil
-}
-func parseBulkHeader(msg []byte, state *readState) error {
-	var err error
-	state.bulkLen, err = strconv.ParseInt(string(msg[1:len(msg)-2]), 10, 64)
+func readLine(r *bufio.Reader) ([]byte, error) {
+	p, err := r.ReadSlice('\n')
 	if err != nil {
-		return errors.New("protocol error: " + string(msg))
+		return nil, err
 	}
-	if state.bulkLen == -1 { // null bulk
-		return nil
-	} else if state.bulkLen > 0 {
-		state.msgType = msg[0]
-		state.readingMultiLine = true
-		state.expectedArgsCount = 1
-		state.args = make([][]byte, 0, 1)
-		return nil
-	} else {
-		return errors.New("protocol error: " + string(msg))
+	i := len(p) - 2
+	if i < 0 || p[i] != '\r' {
+		return nil, protocolErr
+	}
+	return p[:i], nil
+}
+func Btoi(data []byte) (int, error) {
+	if len(data) == 0 {
+		return 0, nil
+	}
+	i := 0
+	sign := 1
+	if data[0] == '-' {
+		i++
+		sign *= -1
+	}
+	if i >= len(data) {
+		return 0, protocolErr
+	}
+	var l int
+	for ; i < len(data); i++ {
+		c := data[i]
+		if c < '0' || c > '9' {
+			return 0, protocolErr
+		}
+		l = l*10 + int(c-'0')
+	}
+	return sign * l, nil
+}
+
+func lower(data []byte) {
+	for i := 0; i < len(data); i++ {
+		if data[i] >= 'A' && data[i] <= 'Z' {
+			data[i] += 'a' - 'A'
+		}
 	}
 }
-func parseMultiBulkHeader(msg []byte, state *readState) error {
-	var err error
-	var expectedLine uint64
-	expectedLine, err = strconv.ParseUint(string(msg[1:len(msg)-2]), 10, 32)
+func copyN(buffer *bytes.Buffer, r *bufio.Reader, n int64) (err error) {
+	if n <= 512 {
+		var buf [512]byte
+		_, err = r.Read(buf[:n])
+		if err != nil {
+			return
+		}
+		buffer.Write(buf[:n])
+	} else {
+		_, err = io.CopyN(buffer, r, n)
+	}
+	return
+}
+func ReadClient(r *bufio.Reader, req *Request) (err error) {
+	line, err := readLine(r)
 	if err != nil {
-		return errors.New("protocol error: " + string(msg))
+		return
 	}
-	if expectedLine == 0 {
-		state.expectedArgsCount = 0
-		return nil
-	} else if expectedLine > 0 {
-		state.msgType = msg[0]
-		state.readingMultiLine = true
-		state.expectedArgsCount = int(expectedLine)
-		state.args = make([][]byte, 0, expectedLine)
-		return nil
-	} else {
-		return errors.New("protocol error: " + string(msg))
+	if len(line) == 0 || line[0] != '*' {
+		err = protocolErr
+		return
 	}
-}
-func readLine(bufReader *bufio.Reader, state *readState) ([]byte, bool, error) {
-	var msg []byte
-	var err error
-	if state.bulkLen == 0 {
-		msg, err = bufReader.ReadBytes('\n')
+	argc, err := Btoi(line[1:])
+	if err != nil {
+		return
+	}
+	if argc <= 0 || argc > 4 {
+		err = protocolErr
+		return
+	}
+	var argStarts [4]int
+	var argEnds [4]int
+	req.Buf.Write(line)
+	req.Buf.Write(CRLF)
+	cursor := len(line) + 2
+	for i := 0; i < argc; i++ {
+		line, err = readLine(r)
 		if err != nil {
-			return nil, true, err
+			return
 		}
-		if len(msg) == 0 || msg[len(msg)-2] != '\r' {
-			return nil, false, errors.New("protocol error: " + string(msg))
+		if len(line) == 0 || line[0] != '$' {
+			err = protocolErr
+			return
 		}
-	} else {
-		msg = make([]byte, state.bulkLen+2)
-		_, err = io.ReadFull(bufReader, msg)
+		var argLen int
+		argLen, err = Btoi(line[1:])
 		if err != nil {
-			return nil, true, err
+			return
 		}
-		if len(msg) == 0 ||
-			msg[len(msg)-2] != '\r' ||
-			msg[len(msg)-1] != '\n' {
-			return nil, false, errors.New("protocol error: " + string(msg))
+		if argLen < 0 || argLen > 512*1024*1024 {
+			err = protocolErr
+			return
 		}
-		state.bulkLen = 0
+		req.Buf.Write(line)
+		req.Buf.Write(CRLF)
+		cursor += len(line) + 2
+		err = copyN(req.Buf, r, int64(argLen)+2)
+		if err != nil {
+			return
+		}
+		argStarts[i] = cursor
+		argEnds[i] = cursor + argLen
+		cursor += argLen + 2
 	}
-	return msg, false, nil
+	data := req.Buf.Bytes()
+	for i := 0; i < argc; i++ {
+		req.Args = append(req.Args, data[argStarts[i]:argEnds[i]])
+	}
+	lower(req.Args[0])
+	return
 }

@@ -30,6 +30,9 @@ func (mdb *StandaloneDatabase) Exec(cmdLine [][]byte) (result []byte) {
 func (mdb *StandaloneDatabase) Close() {
 	mdb.db.Close()
 }
+func (mdb *StandaloneDatabase) Start() {
+
+}
 
 // func (mdb *StandaloneDatabase) AfterClientClose(c connection.Connection) {
 // }

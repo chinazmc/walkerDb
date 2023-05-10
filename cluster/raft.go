@@ -11,9 +11,8 @@ import (
 	"time"
 	"walkerDb/database"
 	databaseface "walkerDb/interface/database"
-	"walkerDb/logger"
+	"walkerDb/parse"
 	"walkerDb/reply"
-	"walkerDb/tcp"
 	"walkerDb/utils"
 )
 
@@ -39,7 +38,7 @@ func newRaftTransport(config *databaseface.RaftDatabaseConfig) (*raft.NetworkTra
 func newRaftNode(config *databaseface.RaftDatabaseConfig, db *database.DB) (*RaftNodeInfo, error) {
 	raftConfig := raft.DefaultConfig()
 	raftConfig.LocalID = raft.ServerID(config.NodeId)
-	raftConfig.Logger = logger.GetLogger()
+	//raftConfig.Logger = log.New(os.Stderr, "raft: ", log.Ldate|log.Ltime)
 	raftConfig.SnapshotInterval = 20 * time.Second
 	raftConfig.SnapshotThreshold = 2 //每commit多少log entry后生成一次快照
 	leaderNotifyCh := make(chan bool, 1)
@@ -90,22 +89,6 @@ func newRaftNode(config *databaseface.RaftDatabaseConfig, db *database.DB) (*Raf
 
 // joinRaftCluster joins a node to raft cluster
 func joinRaftCluster(opts *databaseface.RaftDatabaseConfig) error {
-	//url := fmt.Sprintf("http://%s/join?peerAddress=%s", opts.JoinAddress, opts.RaftTCPAddress)
-	//
-	//resp, err := http.Get(url)
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//defer resp.Body.Close()
-	//body, err := ioutil.ReadAll(resp.Body)
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//if string(body) != "ok" {
-	//	return errors.New(fmt.Sprintf("Error joining cluster: %s", body))
-	//}
 	req := reply.MakeMultiBulkReply([][]byte{
 		[]byte("join"),
 		[]byte(opts.NodeId),
@@ -116,7 +99,7 @@ func joinRaftCluster(opts *databaseface.RaftDatabaseConfig) error {
 	if err != nil {
 		return err
 	}
-	if string(res) != string(tcp.OK) {
+	if string(res) != string(parse.OK) {
 		return errors.New(fmt.Sprintf("Error joining cluster: %s", res))
 	}
 	return nil

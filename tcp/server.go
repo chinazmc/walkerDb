@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"time"
+	"walkerDb/cluster"
 	"walkerDb/database"
 	databaseface "walkerDb/interface/database"
 	"walkerDb/logger"
@@ -15,6 +16,9 @@ type Config struct {
 	DataDir        string
 	Bootstrap      bool
 	JoinAddress    string
+	TcpAddress     string
+	RaftDataDir    string
+	NodeId         string
 }
 type Server struct {
 	cache  databaseface.Database
@@ -38,11 +42,19 @@ func NewServer(config *Config) (server *Server) {
 		})
 	} else {
 		//cluster
+		server.cache = cluster.NewRaftDatabase(&databaseface.RaftDatabaseConfig{
+			DataDir:        config.DataDir,
+			RaftDataDir:    config.RaftDataDir,
+			RaftTCPAddress: config.RaftTCPAddress,
+			TCPAddress:     config.TcpAddress,
+			NodeId:         config.NodeId,
+			JoinAddress:    config.JoinAddress,
+		})
 	}
 	return server
 }
 func (s *Server) Start() {
-	listener, err := net.Listen("tcp", ":8972")
+	listener, err := net.Listen("tcp", s.option.TcpAddress)
 	if err != nil {
 		panic(err)
 	}
@@ -50,6 +62,7 @@ func (s *Server) Start() {
 	logger.Info("Listening on port 8972")
 	s.StartWorkerPool()
 	s.StartEpoll(listener)
+	go s.cache.Start()
 	for {
 		conn, e := listener.Accept()
 		if e != nil {

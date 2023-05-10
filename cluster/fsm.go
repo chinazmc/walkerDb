@@ -13,8 +13,8 @@ type FSM struct {
 }
 type logEntryData struct {
 	Op    string `json:"op,omitempty"`
-	Key   string `json:"key,omitempty"`
-	Value string `json:"value,omitempty"`
+	Key   []byte `json:"key,omitempty"`
+	Value []byte `json:"value,omitempty"`
 }
 
 // Apply applies a Raft log entry to the key-value store.
@@ -25,9 +25,9 @@ func (f *FSM) Apply(logEntry *raft.Log) interface{} {
 	}
 	switch e.Op {
 	case "set":
-		return f.db.Put([]byte(e.Key), []byte(e.Value))
-	case "delete":
-		return f.db.Delete([]byte(e.Key))
+		return f.db.Put(e.Key, e.Value)
+	case "del":
+		return f.db.Delete(e.Key)
 	default:
 		panic(fmt.Sprintf("unrecognized command op: %s", e.Op))
 	}

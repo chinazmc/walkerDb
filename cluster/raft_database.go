@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/hashicorp/raft"
@@ -8,20 +9,20 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strings"
-	"sync/atomic"
 	"time"
 	"walkerDb/database"
 	databaseface "walkerDb/interface/database"
 	"walkerDb/logger"
+	"walkerDb/parse"
 	"walkerDb/reply"
-	"walkerDb/tcp"
 	"walkerDb/utils"
 )
 
 type RaftDatabase struct {
-	db          *database.DB
-	raft        *RaftNodeInfo
-	enableWrite int32
+	db   *database.DB
+	raft *RaftNodeInfo
+	//enableWrite int32
+	config *databaseface.RaftDatabaseConfig
 }
 type ConsistencyLevel string
 
@@ -29,7 +30,7 @@ var (
 	// ErrOpenTimeout is returned when the Store does not apply its initial
 	// logs within the specified time.
 	ErrOpenTimeout = errors.New("timeout waiting for initial logs application")
-	ErrNotLeader   = errors.New("node is not the leader")
+	ErrNotLeader   = errors.New("current node is not the leader")
 )
 
 // Represents the available consistency levels.
@@ -41,6 +42,7 @@ const (
 	ENABLE_WRITE_FALSE                  = int32(0)
 	leaderWaitDelay                     = 100 * time.Millisecond
 	appliedWaitDelay                    = 100 * time.Millisecond
+	raftTimeout                         = 10 * time.Second
 )
 
 func NewRaftDatabase(config *databaseface.RaftDatabaseConfig) *RaftDatabase {
@@ -52,23 +54,28 @@ func NewRaftDatabase(config *databaseface.RaftDatabaseConfig) *RaftDatabase {
 	if err != nil {
 		panic(err)
 	}
-	raft, err := newRaftNode(config, db)
+	raftNode, err := newRaftNode(config, db)
 	if err != nil {
 		logger.Error(fmt.Sprintf("new raft node failed:%v", err))
 	}
+	raftDatabase := &RaftDatabase{db: db, raft: raftNode, config: config}
+	return raftDatabase
+}
+func (d *RaftDatabase) Start() {
+	time.Sleep(100 * time.Millisecond)
+	config := d.config
 	if config.JoinAddress != "" {
-		err = joinRaftCluster(config)
+		err := joinRaftCluster(config)
 		if err != nil {
 			logger.Error(fmt.Sprintf("join raft cluster failed:%v", err))
 		}
 	}
-	raftDatabase := &RaftDatabase{db: db, raft: raft, enableWrite: ENABLE_WRITE_FALSE}
 	// Wait until the store is in full consensus.
 	openTimeout := 120 * time.Second
-	raftDatabase.WaitForLeader(openTimeout)
-	raftDatabase.WaitForApplied(openTimeout)
+	d.WaitForLeader(openTimeout)
+	d.WaitForApplied(openTimeout)
 	// This may be a standalone server. In that case set its own metadata.
-	if err := raftDatabase.SetMeta([]byte(config.NodeId), []byte(config.TCPAddress)); err != nil && err != ErrNotLeader {
+	if err := d.SetMeta([]byte(config.NodeId), []byte(config.TCPAddress)); err != nil && err != ErrNotLeader {
 		// Non-leader errors are OK, since metadata will then be set through
 		// consensus as a result of a join. All other errors indicate a problem.
 		log.Fatalf("failed to SetMeta at %s: %s", config.NodeId, err.Error())
@@ -77,36 +84,91 @@ func NewRaftDatabase(config *databaseface.RaftDatabaseConfig) *RaftDatabase {
 		// monitor leadership
 		for {
 			select {
-			case leader := <-raft.leaderNotifyCh:
+			case leader := <-d.raft.leaderNotifyCh:
 				if leader {
 					logger.Info("become leader, enable write api")
-					raftDatabase.setWriteFlag(true)
+					//d.setWriteFlag(true)
 				} else {
 					logger.Info("become follower, close write api")
-					raftDatabase.setWriteFlag(false)
+					//d.setWriteFlag(false)
 				}
 			}
 		}
 	}()
-	return raftDatabase
 }
-
+func (d *RaftDatabase) redirect(req []byte) ([]byte, error) {
+	//跳转到leader取处理
+	leader := d.LeaderAPIAddr()
+	if leader == "" {
+		//如果还没有leader，那么就需要等待到有leader
+		logger.Error("current stage not leader,waiting!!!")
+		d.WaitForLeader(120 * time.Second)
+		leader = d.LeaderAPIAddr()
+		if leader == "" {
+			return nil, ErrNotLeader
+		}
+	}
+	res, err := utils.SendTcpReq(leader, req)
+	if err != nil {
+		return res, err
+	}
+	return res, nil
+}
 func (d *RaftDatabase) Close() { d.db.Close() }
 func (d *RaftDatabase) Set(key []byte, value []byte) error {
-	if !d.checkWritePermission() {
-		return errors.New("write method not allowed")
+	if d.raft.raft.State() != raft.Leader {
+		req := reply.MakeMultiBulkReply([][]byte{
+			[]byte("set"),
+			key,
+			value,
+		})
+
+		_, err := d.redirect(req.ToBytes())
+		return err
 	}
-	return d.db.Put(key, value)
+	c := &logEntryData{
+		Op:    "set",
+		Key:   key,
+		Value: value,
+	}
+	b, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	f := d.raft.raft.Apply(b, raftTimeout)
+	return f.Error()
 }
 func (d *RaftDatabase) Get(key []byte) ([]byte, error) {
-	return d.db.Get(key)
+	return d.ConsistencyLevelGet(key, Stale)
 }
 
 // Del deletes an item in the cache by key and returns true or false if a delete occurred.
 func (d *RaftDatabase) Del(key []byte) (error, bool) {
-	err := d.db.Delete(key)
+	if d.raft.raft.State() != raft.Leader {
+		req := reply.MakeMultiBulkReply([][]byte{
+			[]byte("del"),
+			key,
+		})
+
+		_, err := d.redirect(req.ToBytes())
+		if err != nil {
+			return err, false
+		}
+		return nil, true
+	}
+
+	c := &logEntryData{
+		Op:  "del",
+		Key: key,
+	}
+	b, err := json.Marshal(c)
 	if err != nil {
 		return err, false
+	}
+
+	f := d.raft.raft.Apply(b, raftTimeout)
+	if f.Error() != nil {
+		return f.Error(), false
 	}
 	return nil, true
 }
@@ -124,22 +186,22 @@ func (d *RaftDatabase) Exec(cmdLine [][]byte) (result []byte) {
 
 	cmdName := strings.ToLower(string(cmdLine[0]))
 	switch cmdName {
-	case string(tcp.JOIN):
+	case string(parse.JOIN):
 		nodeId := string(cmdLine[1])
 		peerAddress := string(cmdLine[2])
 		peertcpAddress := string(cmdLine[3])
-		err := d.join(nodeId, peertcpAddress, peerAddress)
+		err := d.join(nodeId, peerAddress, peertcpAddress)
 		if err != nil {
 			logger.Error(fmt.Sprintf("Error joining peer to raft, peeraddress:%s, err:%v, code:%d", peerAddress, err, http.StatusInternalServerError))
-			return tcp.InternalErr
+			return parse.NotLeaderErr
 		}
-		return tcp.OK
-	case string(tcp.LEVELGET):
+		return parse.OK
+	case string(parse.LEVELGET):
 		key := cmdLine[1]
 		lvl := level(string(cmdLine[2]))
 		res, err := d.ConsistencyLevelGet(key, lvl)
 		if err != nil {
-			return tcp.NIL
+			return parse.NIL
 		}
 		return res
 	default:
@@ -149,7 +211,21 @@ func (d *RaftDatabase) Exec(cmdLine [][]byte) (result []byte) {
 
 // Join joins a node, identified by nodeID and located at addr, to this store.
 // The node must be ready to respond to Raft communications at that address.
-func (d *RaftDatabase) join(nodeID, tcpAddr string, addr string) error {
+func (d *RaftDatabase) join(nodeID, addr, tcpAddr string) error {
+	if d.raft.raft.State() != raft.Leader {
+		req := reply.MakeMultiBulkReply([][]byte{
+			[]byte("join"),
+			[]byte(nodeID),
+			[]byte(addr),
+			[]byte(tcpAddr),
+		})
+
+		_, err := d.redirect(req.ToBytes())
+		if err != nil {
+			return err
+		}
+		return nil
+	}
 	logger.Info(fmt.Sprintf("received join request for remote node %s at %s", nodeID, addr))
 
 	configFuture := d.raft.raft.GetConfiguration()
@@ -208,7 +284,7 @@ func (d *RaftDatabase) ConsistencyLevelGet(key []byte, level ConsistencyLevel) (
 			//跳转到leader取处理
 			leader := d.LeaderAPIAddr()
 			if leader == "" {
-				return tcp.NotLeaderErr, nil
+				return parse.NotLeaderErr, nil
 			}
 			req := reply.MakeMultiBulkReply([][]byte{
 				[]byte("levelget"),
@@ -268,11 +344,11 @@ func (s *RaftDatabase) LeaderAddr() string {
 }
 func level(lvl string) ConsistencyLevel {
 	switch strings.ToLower(lvl) {
-	case "default":
+	case "0":
 		return Default
-	case "stale":
+	case "1":
 		return Stale
-	case "consistent":
+	case "2":
 		return Consistent
 	default:
 		return Default
@@ -335,10 +411,6 @@ func (s *RaftDatabase) WaitForLeader(timeout time.Duration) (string, error) {
 		case <-tck.C:
 			l := s.LeaderAddr()
 			if l != "" {
-				if l == s.raft.serverAddress {
-					//说明当前节点是leader
-					s.setWriteFlag(true)
-				}
 				return l, nil
 			}
 		case <-tmr.C:
@@ -346,14 +418,15 @@ func (s *RaftDatabase) WaitForLeader(timeout time.Duration) (string, error) {
 		}
 	}
 }
-func (s *RaftDatabase) checkWritePermission() bool {
-	return atomic.LoadInt32(&s.enableWrite) == ENABLE_WRITE_TRUE
-}
 
-func (s *RaftDatabase) setWriteFlag(flag bool) {
-	if flag {
-		atomic.StoreInt32(&s.enableWrite, ENABLE_WRITE_TRUE)
-	} else {
-		atomic.StoreInt32(&s.enableWrite, ENABLE_WRITE_FALSE)
-	}
-}
+//func (s *RaftDatabase) checkWritePermission() bool {
+//	return atomic.LoadInt32(&s.enableWrite) == ENABLE_WRITE_TRUE
+//}
+//
+//func (s *RaftDatabase) setWriteFlag(flag bool) {
+//	if flag {
+//		atomic.StoreInt32(&s.enableWrite, ENABLE_WRITE_TRUE)
+//	} else {
+//		atomic.StoreInt32(&s.enableWrite, ENABLE_WRITE_FALSE)
+//	}
+//}
