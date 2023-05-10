@@ -90,17 +90,28 @@ func (p *pool) handleConn(connArgs *ConnArgs) {
 	req := connArgs.req
 	reply := new(bytes.Buffer)
 	cache := connArgs.conn.server.cache
-	if len(req.args) == 4 && bytes.Equal(req.args[0], SETEX) {
-		expire, err := btoi(req.args[2])
-		if err != nil {
-			reply.Write(ERROR_UNSUPPORTED)
-		} else {
-			cache.SetEX(req.args[1], req.args[3], expire)
+	if len(req.args) == 4 {
+		if bytes.Equal(req.args[0], SETEX) {
+			expire, err := btoi(req.args[2])
+			if err != nil {
+				reply.Write(ERROR_UNSUPPORTED)
+			} else {
+				cache.SetEX(req.args[1], req.args[3], expire)
+				reply.Write(OK)
+			}
+		}
+		if bytes.Equal(req.args[0], JOIN) {
+			res := cache.Exec(req.args)
+			reply.Write(res)
+		}
+	} else if len(req.args) == 3 {
+		if bytes.Equal(req.args[0], SET) {
+			cache.Set(req.args[1], req.args[2])
 			reply.Write(OK)
 		}
-	} else if len(req.args) == 3 && bytes.Equal(req.args[0], SET) {
-		cache.Set(req.args[1], req.args[2])
-		reply.Write(OK)
+		if bytes.Equal(req.args[0], LEVELGET) {
+			cache.Exec(req.args)
+		}
 	} else if len(req.args) == 2 {
 		if bytes.Equal(req.args[0], GET) {
 			value, err := cache.Get(req.args[1])
@@ -120,9 +131,6 @@ func (p *pool) handleConn(connArgs *ConnArgs) {
 			} else {
 				reply.Write(CZERO)
 			}
-		} else if bytes.Equal(req.args[0], JOIN) {
-			peerAddress := string(req.args[1])
-
 		}
 	} else if len(req.args) == 1 {
 		if bytes.Equal(req.args[0], PING) {

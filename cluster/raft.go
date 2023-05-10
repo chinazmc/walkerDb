@@ -1,24 +1,28 @@
 package cluster
 
 import (
+	"errors"
 	"fmt"
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb"
-	"io/ioutil"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 	"walkerDb/database"
 	databaseface "walkerDb/interface/database"
 	"walkerDb/logger"
+	"walkerDb/reply"
+	"walkerDb/tcp"
+	"walkerDb/utils"
 )
 
 type RaftNodeInfo struct {
 	raft           *raft.Raft
 	fsm            *FSM
 	leaderNotifyCh chan bool
+	nodeId         string
+	serverAddress  string
 }
 
 func newRaftTransport(config *databaseface.RaftDatabaseConfig) (*raft.NetworkTransport, error) {
@@ -32,9 +36,9 @@ func newRaftTransport(config *databaseface.RaftDatabaseConfig) (*raft.NetworkTra
 	}
 	return transport, nil
 }
-func newRaftNode(config *databaseface.RaftDatabaseConfig) (*RaftNodeInfo, error) {
+func newRaftNode(config *databaseface.RaftDatabaseConfig, db *database.DB) (*RaftNodeInfo, error) {
 	raftConfig := raft.DefaultConfig()
-	raftConfig.LocalID = raft.ServerID(config.RaftTCPAddress)
+	raftConfig.LocalID = raft.ServerID(config.NodeId)
 	raftConfig.Logger = logger.GetLogger()
 	raftConfig.SnapshotInterval = 20 * time.Second
 	raftConfig.SnapshotThreshold = 2 //每commit多少log entry后生成一次快照
@@ -48,14 +52,7 @@ func newRaftNode(config *databaseface.RaftDatabaseConfig) (*RaftNodeInfo, error)
 	if err := os.MkdirAll(config.RaftDataDir, os.ModePerm); err != nil {
 		return nil, err
 	}
-	databaseOpts := database.DefaultOptions
-	if config.DataDir != "" {
-		databaseOpts.DirPath = config.DataDir
-	}
-	db, err := database.Open(databaseOpts)
-	if err != nil {
-		panic(err)
-	}
+
 	fsm := &FSM{
 		db: db,
 	}
@@ -87,27 +84,40 @@ func newRaftNode(config *databaseface.RaftDatabaseConfig) (*RaftNodeInfo, error)
 		},
 	}
 	raftNode.BootstrapCluster(configuration)
-	return &RaftNodeInfo{raft: raftNode, fsm: fsm, leaderNotifyCh: leaderNotifyCh}, nil
+	return &RaftNodeInfo{raft: raftNode, fsm: fsm, leaderNotifyCh: leaderNotifyCh, nodeId: config.NodeId,
+		serverAddress: config.RaftTCPAddress}, nil
 }
 
 // joinRaftCluster joins a node to raft cluster
 func joinRaftCluster(opts *databaseface.RaftDatabaseConfig) error {
-	url := fmt.Sprintf("http://%s/join?peerAddress=%s", opts.JoinAddress, opts.RaftTCPAddress)
-
-	resp, err := http.Get(url)
+	//url := fmt.Sprintf("http://%s/join?peerAddress=%s", opts.JoinAddress, opts.RaftTCPAddress)
+	//
+	//resp, err := http.Get(url)
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//defer resp.Body.Close()
+	//body, err := ioutil.ReadAll(resp.Body)
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//if string(body) != "ok" {
+	//	return errors.New(fmt.Sprintf("Error joining cluster: %s", body))
+	//}
+	req := reply.MakeMultiBulkReply([][]byte{
+		[]byte("join"),
+		[]byte(opts.NodeId),
+		[]byte(opts.RaftTCPAddress),
+		[]byte(opts.TCPAddress),
+	})
+	res, err := utils.SendTcpReq(opts.JoinAddress, req.ToBytes())
 	if err != nil {
 		return err
 	}
-
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return err
+	if string(res) != string(tcp.OK) {
+		return errors.New(fmt.Sprintf("Error joining cluster: %s", res))
 	}
-
-	if string(body) != "ok" {
-		return errors.New(fmt.Sprintf("Error joining cluster: %s", body))
-	}
-
 	return nil
 }

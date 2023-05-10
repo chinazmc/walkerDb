@@ -22,6 +22,7 @@ var (
 	SETEX             = []byte("setex")
 	DEL               = []byte("del")
 	JOIN              = []byte("join")
+	LEVELGET          = []byte("levelget")
 	NIL               = []byte("$-1\r\n")
 	CZERO             = []byte(":0\r\n")
 	CONE              = []byte(":1\r\n")
