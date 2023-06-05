@@ -145,6 +145,19 @@ func main() {
     fmt.Println(string(buf[:n]))
 }
 ```
+## benchmark
+```bash
+goos: windows
+goarch: amd64
+pkg: walkerDb/benchmark
+cpu: Intel(R) Core(TM) i5-4460  CPU @ 3.20GHz
+Benchmark_Put-4            55725             30891 ns/op            4625 B/op          9 allocs/op
+Benchmark_Get-4          1924330               628.5 ns/op           135 B/op          4 allocs/op
+Benchmark_Delete-4       1961263               613.6 ns/op           135 B/op          4 allocs/op
+PASS
+ok      walkerDb/benchmark      7.261s
+
+```
 
 ## 🔮 What will I do next?
 

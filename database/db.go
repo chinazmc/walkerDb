@@ -273,7 +273,7 @@ func (db *DB) Delete(key []byte) error {
 	// 写入到数据文件当中
 	pos, err := db.appendLogRecordWithLock(logRecord)
 	if err != nil {
-		return nil
+		return err
 	}
 	db.reclaimSize += int64(pos.Size)
 
