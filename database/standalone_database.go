@@ -245,3 +245,179 @@ func (rds *StandaloneDatabase) findMetadata(key []byte, dataType redisDataType) 
 	}
 	return meta, nil
 }
+
+// ======================= Set 数据结构 =======================
+func (rds *StandaloneDatabase) SAdd(key, member []byte) (bool, error) {
+	//查找元数据
+	meta, err := rds.findMetadata(key, Set)
+	if err != nil {
+		return false, err
+	}
+	sk := &setInternalKey{
+		key:     key,
+		version: meta.version,
+		member:  member,
+	}
+	var ok bool
+	if _, err = rds.db.Get(sk.encode()); err == ErrKeyNotFound {
+		//不存在的话则更新
+		wb := rds.db.NewWriteBatch(DefaultWriteBatchOptions)
+		meta.size++
+		_ = wb.Put(key, meta.encode())
+		_ = wb.Put(sk.encode(), nil)
+		if err = wb.Commit(); err != nil {
+			return false, err
+		}
+		ok = true
+	}
+	return ok, nil
+}
+func (rds *StandaloneDatabase) SIsMember(key, member []byte) (bool, error) {
+	meta, err := rds.findMetadata(key, Set)
+	if err != nil {
+		return false, err
+	}
+	if meta.size == 0 {
+		return false, nil
+	}
+
+	// 构造一个数据部分的 key
+	sk := &setInternalKey{
+		key:     key,
+		version: meta.version,
+		member:  member,
+	}
+
+	_, err = rds.db.Get(sk.encode())
+	if err != nil && err != ErrKeyNotFound {
+		return false, err
+	}
+	if err == ErrKeyNotFound {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (rds *StandaloneDatabase) SRem(key, member []byte) (bool, error) {
+	meta, err := rds.findMetadata(key, Set)
+	if err != nil {
+		return false, err
+	}
+	if meta.size == 0 {
+		return false, nil
+	}
+
+	// 构造一个数据部分的 key
+	sk := &setInternalKey{
+		key:     key,
+		version: meta.version,
+		member:  member,
+	}
+
+	if _, err = rds.db.Get(sk.encode()); err == ErrKeyNotFound {
+		return false, nil
+	}
+
+	// 更新
+	wb := rds.db.NewWriteBatch(DefaultWriteBatchOptions)
+	meta.size--
+	_ = wb.Put(key, meta.encode())
+	_ = wb.Delete(sk.encode())
+	if err = wb.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// ======================= List 数据结构 =======================
+
+func (rds *StandaloneDatabase) LPush(key, element []byte) (uint32, error) {
+	return rds.pushInner(key, element, true)
+}
+
+func (rds *StandaloneDatabase) RPush(key, element []byte) (uint32, error) {
+	return rds.pushInner(key, element, false)
+}
+
+func (rds *StandaloneDatabase) LPop(key []byte) ([]byte, error) {
+	return rds.popInner(key, true)
+}
+
+func (rds *StandaloneDatabase) RPop(key []byte) ([]byte, error) {
+	return rds.popInner(key, false)
+}
+
+func (rds *StandaloneDatabase) pushInner(key, element []byte, isLeft bool) (uint32, error) {
+	// 查找元数据
+	meta, err := rds.findMetadata(key, List)
+	if err != nil {
+		return 0, err
+	}
+
+	// 构造数据部分的 key
+	lk := &listInternalKey{
+		key:     key,
+		version: meta.version,
+	}
+	if isLeft {
+		lk.index = meta.head - 1
+	} else {
+		lk.index = meta.tail
+	}
+
+	// 更新元数据和数据部分
+	wb := rds.db.NewWriteBatch(DefaultWriteBatchOptions)
+	meta.size++
+	if isLeft {
+		meta.head--
+	} else {
+		meta.tail++
+	}
+	_ = wb.Put(key, meta.encode())
+	_ = wb.Put(lk.encode(), element)
+	if err = wb.Commit(); err != nil {
+		return 0, err
+	}
+
+	return meta.size, nil
+}
+
+func (rds *StandaloneDatabase) popInner(key []byte, isLeft bool) ([]byte, error) {
+	// 查找元数据
+	meta, err := rds.findMetadata(key, List)
+	if err != nil {
+		return nil, err
+	}
+	if meta.size == 0 {
+		return nil, nil
+	}
+
+	// 构造数据部分的 key
+	lk := &listInternalKey{
+		key:     key,
+		version: meta.version,
+	}
+	if isLeft {
+		lk.index = meta.head
+	} else {
+		lk.index = meta.tail - 1
+	}
+
+	element, err := rds.db.Get(lk.encode())
+	if err != nil {
+		return nil, err
+	}
+
+	// 更新元数据
+	meta.size--
+	if isLeft {
+		meta.head++
+	} else {
+		meta.tail--
+	}
+	if err = rds.db.Put(key, meta.encode()); err != nil {
+		return nil, err
+	}
+
+	return element, nil
+}
