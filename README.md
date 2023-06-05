@@ -157,6 +157,16 @@ Benchmark_Delete-4       1961263               613.6 ns/op           135 B/op   
 PASS
 ok      walkerDb/benchmark      7.261s
 
+goos: linux
+goarch: amd64
+pkg: walkerDb/benchmark
+cpu: Intel(R) Xeon(R) CPU E3-1230 v5 @ 3.40GHz
+Benchmark_Put-8      	   88315	     14172 ns/op	    4629 B/op	      10 allocs/op
+Benchmark_Get-8      	 2244297	       527.9 ns/op	     135 B/op	       4 allocs/op
+Benchmark_Delete-8   	 2291954	       519.4 ns/op	     135 B/op	       4 allocs/op
+PASS
+ok  	walkerDb/benchmark	5.984s
+
 ```
 
 ## 🔮 What will I do next?
